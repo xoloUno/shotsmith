@@ -68,8 +68,22 @@ pip install -r requirements.txt
 
 ## Requirements
 
-- Python ≥ 3.9 — any `python3` on PATH
-- Pillow — pinned in `requirements.txt`; pulled in automatically by `pipx install`
+- **Python ≥ 3.9** — any `python3` on PATH
+- **Pillow** — pinned in `requirements.txt`; pulled in automatically by
+  `pipx install`
+- **[frames-cli](https://github.com/viticci/frames-cli)** on PATH — required
+  for the `frame` and `pipeline` subcommands (shotsmith shells out to it
+  for the device-bezel layer). One-time install:
+  ```bash
+  git clone https://github.com/viticci/frames-cli.git
+  cd frames-cli && pip3 install Pillow
+  mkdir -p ~/.local/bin
+  ln -s "$(pwd)/frames" ~/.local/bin/frames
+  frames setup   # downloads the Apple Frames asset pack (~40 MB)
+  ```
+  The `compose` and `verify` subcommands work without frames-cli — they
+  read pre-framed PNGs from `framed/` directly. So if you're framing
+  upstream of shotsmith, you can skip the frames-cli install.
 
 > **Stock macOS note.** `/usr/bin/python3` (3.9) doesn't ship with Pillow.
 > Running `./bin/shotsmith` from a clone without Pillow installed prints
