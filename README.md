@@ -52,18 +52,23 @@ iterating on caption copy or gradient stops.
 
 ## Install
 
+Requires [pipx](https://pipx.pypa.io/). On macOS: `brew install pipx` if
+you don't have it.
+
 ```bash
 pipx install git+https://github.com/xoloUno/shotsmith.git@v0.2.0
 shotsmith --version
 ```
 
-For development from a clone:
+Or install from a clone (no pipx required):
 
 ```bash
 git clone https://github.com/xoloUno/shotsmith.git
 cd shotsmith
 pip install -r requirements.txt
-./bin/shotsmith --version
+mkdir -p ~/.local/bin
+ln -s "$(pwd)/bin/shotsmith" ~/.local/bin/shotsmith
+shotsmith --version
 ```
 
 ## Requirements
