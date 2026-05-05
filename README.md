@@ -199,14 +199,14 @@ up with canonical names matching captions.json.
 ```json
 "input_mapping": {
   "iphone": {
-    "01_LiveActivities.png":   "from_simctl_NotificationCenter.png",
-    "02_HomeScreen.png":        "01_HomeScreen.png",
-    "03_SymptomPicker.png":     "02_SymptomPicker.png",
-    "04_SymptomDetail.png":     "03_SymptomDetail.png",
-    "05_StopConfirmation.png":  "04_StopConfirmation.png",
-    "06_ControlCenter.png":     "from_simctl_ControlCenter.png",
-    "07_HomeScreenWidgets.png": "from_simctl_HomeScreen.png",
-    "08_HomeScreenDark.png":    "05_HomeScreenDark.png"
+    "01_LiveActivities.png":    "from_simctl_NotificationCenter.png",
+    "02_HomeScreen.png":         "01_HomeScreen.png",
+    "03_PrimaryAction.png":      "02_PrimaryAction.png",
+    "04_DetailView.png":         "03_DetailView.png",
+    "05_Confirmation.png":       "04_Confirmation.png",
+    "06_ControlCenter.png":      "from_simctl_ControlCenter.png",
+    "07_HomeScreenWidgets.png":  "from_simctl_HomeScreen.png",
+    "08_HomeScreenDark.png":     "05_HomeScreenDark.png"
   }
 }
 ```
@@ -288,13 +288,13 @@ code. Each value is either a **string** (caption only) or a **dict** with
 ```json
 {
   "01_HomeScreen.png": {
-    "en":    { "caption": "Track everything", "subtitle": "in one place" },
-    "es":    { "caption": "Todo en un solo lugar", "subtitle": "en tiempo real" },
-    "es-MX": { "caption": "Todo en un solo lugar", "subtitle": "en tiempo real" }
+    "en":    { "caption": "Your headline here", "subtitle": "with an optional subtitle" },
+    "es":    { "caption": "Tu titular aquí", "subtitle": "con un subtítulo opcional" },
+    "es-MX": { "caption": "Tu titular aquí", "subtitle": "con un subtítulo opcional" }
   },
   "02_Detail.png": {
-    "en":    "Drill down with one tap",
-    "es":    "Profundiza con un solo toque"
+    "en":    "Caption-only entries use the string form",
+    "es":    "Las entradas sin subtítulo usan la forma de string"
   }
 }
 ```
@@ -315,9 +315,9 @@ independently — override the caption for iPhone without touching subtitles.
 {
   "01_HomeScreen.png": {
     "en": {
-      "caption":        "Track everything in one place",
-      "caption_iphone": "Track everything\nin one place",
-      "subtitle":       "in real time"
+      "caption":        "Your headline goes right here",
+      "caption_iphone": "Your headline\ngoes right here",
+      "subtitle":       "with an optional subtitle"
     }
   }
 }
@@ -351,8 +351,8 @@ the available width, sharing the `max_lines` budget across all segments.
 {
   "01.png": {
     "en": {
-      "caption": "Track everything\nin one place",
-      "subtitle": "in real time"
+      "caption": "Your headline\non two lines",
+      "subtitle": "with an optional subtitle"
     }
   }
 }

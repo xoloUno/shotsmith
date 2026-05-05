@@ -90,9 +90,9 @@ Per-image, per-locale. String form is shorthand for caption-only; dict form supp
 ```json
 {
   "01_HomeScreen.png": {
-    "en":    { "caption": "Track everything", "subtitle": "in one place" },
-    "en-US": { "caption_iphone": "Track everything\nin one place" },
-    "es":    "Todo en un solo lugar"
+    "en":    { "caption": "Your headline", "subtitle": "with an optional subtitle" },
+    "en-US": { "caption_iphone": "Your headline\non two lines" },
+    "es":    "Tu titular aquí"
   }
 }
 ```

@@ -17,8 +17,8 @@ locale can be either:
 
   Common use cases:
   - iPhone hero shot has a forced line break; iPad runs single-line on the
-    wider canvas: `{"caption": "Real time symptom tracking",
-    "caption_iphone": "Real time\\nsymptom tracking"}`.
+    wider canvas: `{"caption": "Your headline goes here",
+    "caption_iphone": "Your headline\\ngoes here"}`.
   - Different copy entirely per device: pass both `caption_iphone` and
     `caption_ipad`; omit `caption` entirely if every device has an override.
 

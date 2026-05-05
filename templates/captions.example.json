@@ -1,17 +1,17 @@
 {
   "01_HomeScreen.png": {
     "en": {
-      "caption":        "Track everything in one place",
-      "caption_iphone": "Track everything\nin one place",
-      "subtitle":       "in real time"
+      "caption":        "Your headline goes here",
+      "caption_iphone": "Your headline\ngoes here",
+      "subtitle":       "with an optional subtitle"
     },
     "es": {
-      "caption":  "Todo en un solo lugar",
-      "subtitle": "en tiempo real"
+      "caption":  "Tu titular aquí",
+      "subtitle": "con un subtítulo opcional"
     }
   },
   "02_Detail.png": {
-    "en": "Drill down\nwith one tap",
-    "es": "Profundiza con un solo toque"
+    "en": "Caption-only entries\nuse the string form",
+    "es": "Las entradas sin subtítulo usan la forma de string"
   }
 }

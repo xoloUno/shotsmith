@@ -50,11 +50,11 @@ def test_captions_lookup_missing_returns_none():
 
 def test_captions_lookup_dict_form_returns_subtitle():
     c = captions_mod.Captions({
-        "a.png": {"en": {"caption": "Track everything", "subtitle": "in one place"}}
+        "a.png": {"en": {"caption": "Your headline", "subtitle": "with subtitle"}}
     })
     entry = c.lookup("a.png", "en")
-    assert entry.caption == "Track everything"
-    assert entry.subtitle == "in one place"
+    assert entry.caption == "Your headline"
+    assert entry.subtitle == "with subtitle"
 
 
 def test_captions_lookup_dict_form_subtitle_optional():
@@ -76,14 +76,14 @@ def test_captions_lookup_invalid_value_type_raises():
 def test_captions_per_device_caption_override():
     c = captions_mod.Captions({
         "a.png": {"en": {
-            "caption": "Real time symptom tracking",
-            "caption_iphone": "Real time\nsymptom tracking",
+            "caption": "Your headline goes here",
+            "caption_iphone": "Your headline\ngoes here",
         }}
     })
     iphone = c.lookup("a.png", "en", device_key="iphone")
     ipad = c.lookup("a.png", "en", device_key="ipad")
-    assert iphone.caption == "Real time\nsymptom tracking"
-    assert ipad.caption == "Real time symptom tracking"
+    assert iphone.caption == "Your headline\ngoes here"
+    assert ipad.caption == "Your headline goes here"
 
 
 def test_captions_per_device_subtitle_override():
@@ -445,7 +445,7 @@ def test_compose_locale_with_subtitle_writes_output(tmp_path):
     }
     cfg_path.write_text(json.dumps(raw))
     captions_data = {
-        "a.png": {"en": {"caption": "Track everything", "subtitle": "in one place"}}
+        "a.png": {"en": {"caption": "Your headline", "subtitle": "with subtitle"}}
     }
     (tmp_path / "captions.json").write_text(json.dumps(captions_data))
 
