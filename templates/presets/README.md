@@ -1,8 +1,8 @@
-# Phase 2 gradient finalists
+# Gradient presets
 
-Three palettes selected from the iPhone gradient batch comparison
-(2026-04-28). Each is a complete config that runs against the local test
-fixtures so the rendered samples can be re-inspected without re-batching.
+Three palettes carried forward from shotsmith's early-development gradient
+batch comparison. Each is a complete config that runs against the bundled
+test fixtures so the rendered samples can be re-inspected.
 
 | Preset | Top | Bottom | Notes |
 |---|---|---|---|
@@ -19,15 +19,14 @@ All three share:
 ## Re-rendering
 
 ```bash
-cd tools/shotsmith
-./bin/shotsmith compose --config templates/presets/mauve.json --device iphone
+shotsmith compose --config templates/presets/mauve.json --device iphone
 open tests/fixtures/sample-output/presets/mauve/iphone/en-US/01_HomeScreen.png
 ```
 
-## Phase 2 plan
+## Adopting a preset in your project
 
-When Phase 2 starts (parity check against appshot in Flara), copy the
-chosen preset's `background` and `caption` blocks into Flara's
-`fastlane/shotsmith/config.json`, then point `input` and `output` at
-Flara's actual paths. Render all 8 captioned screenshots and compare
-against the current appshot output before deciding which preset ships.
+Copy the chosen preset's `background` and `caption` blocks into your
+project's `fastlane/shotsmith/config.json`, then point `input` and
+`output` at your project's actual paths. The preset's gradient stops,
+font, and dither value give you a tested starting point — tune from
+there.

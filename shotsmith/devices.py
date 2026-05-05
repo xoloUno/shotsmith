@@ -22,7 +22,7 @@ class DeviceProfile:
 
 
 # framed_* values come from frames-cli's actual output dimensions.
-# iPhone 6.9" framed = 1470x3000 (verified via Flara's lone surviving intermediate).
+# iPhone 6.9" framed = 1470x3000 (verified empirically against frames-cli output).
 # iPad 13" framed = 2228x3084 (estimated from frames-cli's iPad scaling pattern;
 #   verify warns rather than errors if real values differ on first frame run).
 DEVICES: dict[str, DeviceProfile] = {

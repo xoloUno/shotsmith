@@ -48,8 +48,8 @@ git history (via `git subtree split`).
   with its own font, color, sizes, max lines, and spacing. Activated
   per-image via dict-form caption entries.
 - **Three bundled gradient presets** at `templates/presets/`: `mauve`
-  (dusty purple → coral), `royal-purple` (deep violet → coral; used by
-  Flara), `apple-music` (deep red → coral).
+  (dusty purple → coral), `royal-purple` (deep violet → coral),
+  `apple-music` (deep red → coral).
 - **Friendly Pillow diagnostic** — `bin/shotsmith` shim catches missing
   Pillow and prints the exact `pip install` command for the active
   Python interpreter, instead of letting an `ImportError` traceback

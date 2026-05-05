@@ -440,18 +440,18 @@ for the full ASC matrix.
 ## Tests
 
 ```bash
-cd tools/shotsmith
 pip install -r requirements.txt pytest
 pytest tests/
 ```
 
 The end-to-end test synthesizes a fake framed PNG, runs the full compose
-pipeline, and asserts output dimensions. Golden-image diffs are deferred to
-Phase 2 of the implementation plan (parity check against appshot in Flara).
+pipeline, and asserts output dimensions. Golden-image diffs are deferred —
+shotsmith's output is currently validated by visual inspection during real
+ASC submission rounds.
 
-## Phase 2 gradient finalists
+## Bundled gradient presets
 
-Three palettes carried forward for the Flara parity check, saved at
+Three palettes selected during shotsmith's early development, saved at
 [templates/presets/](templates/presets/):
 
 - **mauve** — `#A56FB4` → `#FF6B5C` (soft dusty purple → coral)
@@ -460,7 +460,7 @@ Three palettes carried forward for the Flara parity check, saved at
 
 All share `dither: 30`, white captions, `New York Small Bold`. See
 [templates/presets/README.md](templates/presets/README.md) for the
-re-rendering recipe and Phase 2 adoption notes.
+re-rendering recipe and adoption notes.
 
 ## Roadmap
 
@@ -480,7 +480,7 @@ re-rendering recipe and Phase 2 adoption notes.
 
 ## Why not appshot?
 
-Flara's screenshot pipeline used `appshot-cli` for caption + gradient
+shotsmith's predecessor pipeline used `appshot-cli` for caption + gradient
 composition, but the install required a 22-line monkey-patch
 (`patch-appshot.sh`) to override the built-in iPhone/iPad font-size strategy
 — captions rendered illegibly small at ASC sizes otherwise. The patch had to

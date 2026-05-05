@@ -1,12 +1,11 @@
 """End-to-end + unit tests for shotsmith composition.
 
-Run with: `pytest tests/` from the tools/shotsmith directory.
+Run with: `pytest tests/` from the repo root.
 
 The end-to-end test synthesizes a tiny framed PNG, composes it through the
 full pipeline, and asserts dimensions + that captions and gradient pixels are
-present. It does NOT do golden-image diff — golden images for this tool are
-established by visual inspection in Phase 2 of the implementation plan
-(side-by-side parity check against appshot in Flara).
+present. It does NOT do golden-image diff — output quality for this tool is
+validated by visual inspection during real ASC submission rounds.
 """
 
 from __future__ import annotations
