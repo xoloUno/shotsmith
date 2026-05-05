@@ -1,20 +1,54 @@
 # shotsmith
 
-Compose App Store screenshots: gradient backgrounds, captions, multi-locale —
-takes already-framed PNGs (from `frames-cli` or any other framer) and produces
-ASC-ready submission images.
+App Store screenshot composer: gradients, captions, multi-locale. Takes
+already-framed PNGs (from `frames-cli` or any other framer) and produces
+ASC-ready submission images. Pure Python, single dependency (Pillow), wraps
+`frames-cli` for device bezels.
 
-Built as a CLI alternative to `appshot-cli`'s caption + gradient layer. Uses
-Pillow (FreeType + HarfBuzz) for typography. Pure Python, single dependency.
-Wraps `frames-cli` for device bezels.
+**v0.2.0** — iPhone 6.9" + iPad 13", multi-locale, manual-input staging.
+Apple Watch is intentionally out of scope (see [Watch screenshots](#watch-screenshots)).
 
-## Status
+## TL;DR
 
-v0.2.0 — orchestrator complete. iPhone 6.9" + iPad 13" supported. Multi-locale
-supported. Watch is intentionally not handled — Apple Watch ASC submissions
-are screen-only PNGs from `simctl io screenshot` because the watch hardware's
-display corner-radius clips any framing or caption art at viewing time. See
-the **Watch screenshots** note below.
+A typical run takes raw screenshots from your simulator and emits
+ASC-ready PNGs you can `fastlane deliver` upload directly. One command:
+
+```bash
+shotsmith pipeline --config fastlane/shotsmith/config.json
+```
+
+What it does, in order:
+
+1. **verify** — checks the directory contract: confirms `raw/` is
+   populated, flags orphan PNGs at the locale root, names any missing
+   `manual_inputs` source files end-to-end.
+2. **stage** — copies any declared manual-gesture captures (Live
+   Activity, Home Screen widget, Control Center) from your tracked
+   `manual-captures/` source into `raw/`. No-op if your config has
+   no `manual_inputs` block.
+3. **frame** — wraps `frames-cli` to draw Apple device bezels around
+   each raw PNG. Reads from `raw/`, writes to `framed/`.
+4. **compose** — overlays each framed PNG onto a gradient background,
+   draws the caption (and optional subtitle) per locale, and writes
+   the final ASC-ready PNG at exactly `1320×2868` (iPhone 6.9") or
+   `2064×2752` (iPad 13") — Apple's required submission sizes.
+
+Output flows like this:
+
+```
+raw simctl/UITest PNGs (in <input>/<locale>/<device>/raw/)
+        ↓ shotsmith stage         (copies manual_inputs → raw/)
+        ↓ shotsmith frame         (wraps frames-cli → framed/)
+framed PNGs
+        ↓ shotsmith compose       (gradient + caption per locale)
+ASC-ready PNGs (in <output>/<locale>/<device>/)
+        ↓ fastlane deliver
+App Store Connect
+```
+
+Re-running `compose` alone (`--steps compose`) re-renders captioned PNGs
+in seconds without re-capturing or re-framing — useful when you're
+iterating on caption copy or gradient stops.
 
 ## Install
 
@@ -34,48 +68,49 @@ pip install -r requirements.txt
 
 ## Requirements
 
-- Python ≥ 3.9 (any `python3` on PATH)
-- Pillow (pinned in `requirements.txt`; pulled in automatically by `pipx install`)
+- Python ≥ 3.9 — any `python3` on PATH
+- Pillow — pinned in `requirements.txt`; pulled in automatically by `pipx install`
 
-The `bin/shotsmith` shim resolves `python3` via `/usr/bin/env`. On stock macOS
-that's `/usr/bin/python3` (3.9) — which does **not** ship with Pillow. If you
-run the shim from a clone without Pillow installed, it prints the exact
-`pip install` command for your active Python and exits with a non-zero
-status. Copy-paste the command and re-run. (`pipx install` avoids this entirely
-since it manages the Pillow install for you.)
+> **Stock macOS note.** `/usr/bin/python3` (3.9) doesn't ship with Pillow.
+> Running `./bin/shotsmith` from a clone without Pillow installed prints
+> the exact `pip install` command for your active Python and exits.
+> `pipx install` handles this for you. To use a specific interpreter:
+> `/usr/local/bin/python3 ./bin/shotsmith --version`.
 
-If you'd rather use a newer Python (e.g. Homebrew's `/usr/local/bin/python3`),
-invoke the shim through that interpreter directly:
+## Usage
 
-```bash
-/usr/local/bin/python3 ./bin/shotsmith --version
-```
-
-## Watch screenshots
-
-shotsmith never composes Apple Watch screenshots. ASC submissions go straight
-from `simctl io screenshot` (raw 422×514 native for Ultra 3) to the upload
-payload — no framing, no gradient, no caption. The watch hardware's display
-corner-radius would clip added art at viewing time. For non-ASC marketing
-needs (web pages, press kits), run `frames-cli` on the raw capture rather
-than maintaining a separate composition pipeline.
-
-## Claude Code skill
-
-A standalone Claude Code skill is shipped at `skill/SKILL.md`. Install once
-to give any Claude Code session in any project native awareness of
-shotsmith's schema, subcommands, and directory contract:
+Five subcommands. All take `--config`, `--locale` (repeatable), `--device`
+(repeatable). With no filter flags, every (device × locale) combination runs.
 
 ```bash
-mkdir -p ~/.claude/skills/shotsmith
-ln -s "$(pwd)/skill/SKILL.md" ~/.claude/skills/shotsmith/SKILL.md
+# Stage manual_inputs sources into raw/ (no-op without manual_inputs config)
+shotsmith stage    --config path/to/config.json
+
+# Frame — wraps frames-cli, reads raw/, writes framed/
+shotsmith frame    --config path/to/config.json
+shotsmith frame    --config path/to/config.json --force   # re-frame existing
+
+# Compose — reads framed/, writes ASC-ready PNGs
+shotsmith compose  --config path/to/config.json
+shotsmith compose  --config path/to/config.json --locale en-US --device iphone --dry-run
+
+# Verify the directory contract
+shotsmith verify   --config path/to/config.json
+
+# Pipeline — verify, then stage + frame + compose end-to-end
+shotsmith pipeline --config path/to/config.json
+shotsmith pipeline --config path/to/config.json --steps capture,stage,frame,compose
+shotsmith pipeline --config path/to/config.json --steps compose   # just re-render
 ```
+
+`pipeline --steps` defaults to `stage,frame,compose`. Add `capture` if your
+config defines a `pipeline.capture_hook`. The `stage` step is a no-op
+without a `manual_inputs` block.
 
 ## Directory contract
 
-shotsmith enforces a stable per-device directory layout. For each device's
-configured input path, two siblings hold the intermediate and final-input
-PNGs:
+Stable per-device layout. Two siblings under each device's configured input
+path hold the intermediate and final-input PNGs:
 
 ```
 <input.{device}>/<locale>/
@@ -85,40 +120,9 @@ PNGs:
 <output.{device}>/<locale>/   ← shotsmith composed output (per preset)
 ```
 
-Loose PNGs at the locale root are an anti-pattern — `shotsmith verify` flags
-them. The contract makes "edit a caption and re-render" cheap (seconds; no
-re-capture or re-frame) while ensuring intermediates are never silently lost.
-
-## Usage
-
-Five subcommands. All take `--config`, `--locale` (repeatable), `--device`
-(repeatable). With no filter flags, every (device × locale) combination runs.
-
-```bash
-# Stage manual_inputs sources into raw/ (no-op without manual_inputs config)
-./bin/shotsmith stage    --config path/to/config.json
-
-# Frame — wraps frames-cli, reads raw/, writes framed/
-./bin/shotsmith frame    --config path/to/config.json
-./bin/shotsmith frame    --config path/to/config.json --force   # re-frame existing
-
-# Compose — reads from <input>/<locale>/framed/, writes ASC-ready PNGs
-./bin/shotsmith compose  --config path/to/config.json
-./bin/shotsmith compose  --config path/to/config.json --locale en-US --device iphone --dry-run
-
-# Verify directory contract — reports errors (alpha, dim mismatch, orphans, missing manual_inputs) + warnings (missing dirs)
-./bin/shotsmith verify   --config path/to/config.json
-
-# Pipeline — verify, then stage + frame + compose end-to-end
-./bin/shotsmith pipeline --config path/to/config.json
-./bin/shotsmith pipeline --config path/to/config.json --steps capture,stage,frame,compose
-./bin/shotsmith pipeline --config path/to/config.json --steps compose   # just re-render
-```
-
-`pipeline --steps` defaults to `stage,frame,compose`. Add `capture` if your
-config defines a `pipeline.capture_hook`. The `stage` step is a no-op without
-a `manual_inputs` block, so projects without manual-gesture surfaces aren't
-affected.
+- Loose PNGs at the locale root are flagged by `shotsmith verify`.
+- Re-rendering after a caption tweak is cheap (seconds; no re-capture or re-frame).
+- Intermediates are never silently lost.
 
 ## Config
 
@@ -156,24 +160,22 @@ and which locales to render. See `templates/config.example.json`:
 }
 ```
 
-Path templates use `{locale}` and are resolved relative to the config file's
-directory. Note: `input.{device}` names the per-device root; `raw/` and
-`framed/` subdirs underneath `<input>/<locale>/` are created and managed by
-shotsmith.
+Path templates use `{locale}` and resolve relative to the config file's
+directory. `input.{device}` names the per-device root; `raw/` and `framed/`
+subdirs underneath `<input>/<locale>/` are managed by shotsmith.
 
-### Input mapping (optional, recommended for multi-source pipelines)
+### Input mapping (optional)
 
-Capture tools rarely write filenames that match what you want to ship. XCUITest
-captures in implementation order; ASC displays in alphabetical order; consumer
-order (which screen is the marketing hero?) is independent of both. And once
-you mix capture sources — XCUITest for in-app, simctl for system surfaces,
-SwiftUI ImageRenderer for Live Activities (Phase 7) — every source has its
-own naming conventions.
+Capture tools rarely write filenames matching what you want to ship —
+XCUITest captures in implementation order, ASC displays alphabetically,
+consumer order (which screen is the marketing hero?) is independent of
+both. Mixing capture sources (XCUITest, simctl, manual gestures) means
+each source has its own naming conventions.
 
 `input_mapping` is a per-device dict translating **canonical filename**
 (captions.json key) → **source filename** (whatever the capture tool wrote
-into `raw/`). The frame step uses this lookup, so `framed/` always ends up
-with canonical names that match captions.json.
+into `raw/`). The frame step uses this lookup, so `framed/` always ends
+up with canonical names matching captions.json.
 
 ```json
 "input_mapping": {
@@ -190,24 +192,23 @@ with canonical names that match captions.json.
 }
 ```
 
-Without `input_mapping`, shotsmith uses identity — every PNG in `raw/` becomes
-the same filename in `framed/`. So simple pipelines need no mapping at all.
+Without `input_mapping`, shotsmith uses identity — every PNG in `raw/`
+becomes the same filename in `framed/`. Simple pipelines need no mapping.
 
-### Manual inputs (optional, for projects with manual-gesture surfaces)
+### Manual inputs (optional)
 
-Some screenshot surfaces — Live Activity stack on the lock screen, Home Screen
-widget page, Control Center pulled down — can't reliably be captured by
-XCUITest or simctl scripts. They need a human gesture in the simulator. The
+Some screenshot surfaces — Live Activity stack, Home Screen widget,
+Control Center pulled down — can't reliably be captured by XCUITest or
+simctl scripts. They need a human gesture in the simulator. Any tool
+that produces tracked PNGs in a per-locale directory works (the
 [xoloUno iOS project playbook](https://github.com/xoloUno/claude-code-ios-playbook)
-ships a `/capture-manual-surfaces` slash command for that flow, but any
-mechanism that produces tracked PNGs in a per-locale directory works — the
-filenames just need to match what `manual_inputs.{device}.files` declares.
-Recapture "once per release" when the underlying UI changes.
+ships a `/capture-manual-surfaces` slash command for this); filenames
+just need to match what `manual_inputs.{device}.files` declares.
+Recapture once per release when the underlying UI changes.
 
-The `manual_inputs` config block declares those sources. The `stage` pipeline
-step copies declared files from `<source>/<file>` into `<raw_dir>/<file>`
-before frame, and `verify` reports a hard error when a declared source file
-is missing from disk:
+The `manual_inputs` config block declares those sources. The `stage`
+pipeline step copies them into `<raw_dir>/` before frame, and `verify`
+reports a hard error when a declared source file is missing:
 
 ```json
 "manual_inputs": {
@@ -222,38 +223,30 @@ is missing from disk:
 }
 ```
 
-Per device. `source` is config-relative and supports `{locale}`. Files are
-named with the conventional `90/91/92_` prefix; pair with `input_mapping` to
-rename them to canonical caption keys at frame time.
+Per device. `source` is config-relative and supports `{locale}`. Files
+typically use the conventional `90/91/92_` prefix; pair with
+`input_mapping` to rename them to canonical caption keys at frame time.
 
-**Why declare them in config rather than handle staging in your Fastfile?**
-Three reasons:
+**Why declare them in config rather than handle staging in your Fastfile/script?**
 
-1. **Single source of truth.** The contract for "what manual surfaces this
-   project ships" lives next to the gradient and captions, not in a Ruby
-   block that drifts across projects.
-2. **End-to-end verify.** Without `manual_inputs`, a missing manual capture
-   surfaces only via `input_mapping` indirection in the frame step ("source
-   X.png not found in raw/"). With `manual_inputs`, `shotsmith verify`
-   names the missing source file directly:
-   `manual_inputs source(s) missing in /…/manual-captures/es-MX:
-   91_HomeScreen_Widget.png`.
-3. **Composability with `--steps stage`.** Re-stage without re-framing or
-   re-composing when you recapture a single surface.
+- **Single source of truth** — the contract for "what manual surfaces this
+  project ships" lives next to the gradient and captions, not in glue code
+  that drifts across projects.
+- **End-to-end verify** — without `manual_inputs`, a missing manual capture
+  surfaces only via `input_mapping` indirection ("source X.png not found in
+  raw/"). With `manual_inputs`, `shotsmith verify` names the missing source
+  file directly: `manual_inputs source(s) missing in /…/manual-captures/es-MX:
+  91_HomeScreen_Widget.png`.
+- **Composability** — re-stage without re-framing or re-composing when you
+  recapture a single surface (`shotsmith stage --device iphone --locale es-MX`).
 
-A config without `manual_inputs` makes both `stage` (the step and the
-subcommand) a no-op — projects without manual-gesture surfaces aren't
-affected.
-
-`shotsmith verify` reports each canonical name whose source file isn't in
-`raw/` so you can see which capture step is missing. `shotsmith frame` skips
-those with an actionable reason ("source X.png not found in raw/ — check
-input_mapping or capture step").
+A config without `manual_inputs` makes both the `stage` step and the
+subcommand a no-op.
 
 ### Pipeline block (optional)
 
-Adding a `pipeline` block to the config enables the `frame`, `verify`, and
-`pipeline` subcommands. Without it, only `compose` works.
+Adds the `frame`, `verify`, and `pipeline` subcommands. Without it, only
+`compose` works.
 
 | Field | Default | Purpose |
 |---|---|---|
@@ -269,8 +262,8 @@ values produce visible grain. Inspired by Arc browser's gradient treatment.
 
 ### Captions file
 
-A separate JSON keyed by input PNG filename, each entry keyed by language code.
-Each value can be either a **string** (caption only) or a **dict** with
+A separate JSON keyed by input PNG filename, each entry keyed by language
+code. Each value is either a **string** (caption only) or a **dict** with
 `caption` and optional `subtitle` keys:
 
 ```json
@@ -287,19 +280,17 @@ Each value can be either a **string** (caption only) or a **dict** with
 }
 ```
 
-The string form is shorthand for `{"caption": "...", "subtitle": null}` —
-backward-compatible with the original schema.
+The string form is shorthand for `{"caption": "...", "subtitle": null}`.
 
-shotsmith tries the full locale first (`es-MX`), then the language portion
-(`es`), then skips the image with a warning.
+shotsmith resolves locale → language fallback (`es-MX` → `es` → skip with
+warning).
 
 ### Per-device caption + subtitle overrides
 
 Each per-locale dict-form value can carry device-specific override keys
-alongside the defaults. When rendering for device X, shotsmith tries
-`caption_X` first, falls back to `caption`. Same for `subtitle_X` /
-`subtitle`. The two resolve independently — you can override only the
-caption for iPhone without touching subtitles.
+alongside the defaults. shotsmith tries `caption_X` first, falls back to
+`caption`. Same for `subtitle_X` / `subtitle`. The two resolve
+independently — override the caption for iPhone without touching subtitles.
 
 ```json
 {
@@ -313,18 +304,16 @@ caption for iPhone without touching subtitles.
 }
 ```
 
-Common use case: iPhone wants a forced line break for visual punch, iPad's
-wider canvas reads better as a single line. Just add `caption_iphone` (or
-`caption_ipad`) with the device-specific copy. Devices without an override
-fall back to `caption`.
+Common case: iPhone wants a forced line break for visual punch; iPad's
+wider canvas reads better as a single line.
 
 ### Per-device padding (`padding_pct_iphone`, `padding_pct_ipad`)
 
-The `caption.padding_pct` value is the default; optional `padding_pct_iphone`
-and `padding_pct_ipad` overrides let you tighten or loosen the caption_area
-on a specific device. Useful when one device's canvas proportions make the
-default feel wrong — for example, iPad's wider canvas can take less padding
-to recover image_area height for the framed PNG.
+`caption.padding_pct` is the default; optional `padding_pct_iphone` and
+`padding_pct_ipad` overrides tighten or loosen the caption_area on a
+specific device. Useful when one device's canvas proportions make the
+default feel wrong — e.g. iPad's wider canvas can take less padding to
+recover image_area height for the framed PNG.
 
 ```json
 "caption": {
@@ -335,10 +324,9 @@ to recover image_area height for the framed PNG.
 
 ### Forced line breaks
 
-Use `\n` (a literal newline character in the JSON string — JSON parses `\n`
-as a newline natively) to force a line break inside any caption or subtitle.
-Each forced segment is then independently word-wrapped to fit the available
-width, sharing the `max_lines` budget across all segments.
+Use `\n` (literal newline in JSON) to force a break inside any caption
+or subtitle. Each forced segment is independently word-wrapped to fit
+the available width, sharing the `max_lines` budget across all segments.
 
 ```json
 {
@@ -351,16 +339,16 @@ width, sharing the `max_lines` budget across all segments.
 }
 ```
 
-If the total wrapped lines exceed `max_lines`, the last visible line is
-truncated with an ellipsis. Empty segments (`\n\n`) are collapsed — to add
-vertical gap, increase `subtitle.spacing_pct` instead.
+If total wrapped lines exceed `max_lines`, the last visible line is
+truncated with an ellipsis. Empty segments (`\n\n`) are collapsed — to
+add vertical gap, increase `subtitle.spacing_pct`.
 
 ### Subtitle (optional)
 
-Add a `subtitle` block alongside `caption` to enable a smaller secondary line
-beneath each caption. The subtitle has its own font, color, sizes, and max
-lines. `spacing_pct` controls the gap between caption and subtitle (as a
-percent of canvas height).
+Add a `subtitle` block alongside `caption` to enable a smaller secondary
+line beneath each caption. Has its own font, color, sizes, and max
+lines. `spacing_pct` controls the gap between caption and subtitle (as
+a percent of canvas height).
 
 ```json
 "subtitle": {
@@ -374,25 +362,36 @@ percent of canvas height).
 }
 ```
 
-If the `subtitle` config block is omitted, no subtitle is ever rendered (and
-any subtitle text in the captions file is ignored). If present, it activates
-per image based on the caption-file value: dict-form entries with a non-empty
-`subtitle` get one; string-form or dict-form-without-subtitle entries get
-caption-only layout.
+If the `subtitle` block is omitted, no subtitle is rendered. If present,
+it activates per image based on the caption-file value: dict-form
+entries with a non-empty `subtitle` get one; string-form or
+dict-form-without-subtitle entries get caption-only layout.
 
 ### Font resolution
 
 Two ways to specify the font in `caption.font`:
 
-1. **Family + style name** — e.g. `"New York Small Bold"`. shotsmith searches
-   `/System/Library/Fonts`, `/Library/Fonts`, and `~/Library/Fonts` for matching
-   files using Apple's optical-size + weight naming convention
-   (`NewYorkSmall-Bold.otf`).
-2. **Direct path** — anything containing `/` or ending in `.ttf`/`.otf`/`.ttc`
-   is used verbatim, e.g. `"/Library/Fonts/NewYorkSmall-Bold.otf"`.
+1. **Family + style name** — e.g. `"New York Small Bold"`. shotsmith
+   searches `/System/Library/Fonts`, `/Library/Fonts`, and
+   `~/Library/Fonts` using Apple's optical-size + weight naming
+   convention (`NewYorkSmall-Bold.otf`).
+2. **Direct path** — anything containing `/` or ending in
+   `.ttf`/`.otf`/`.ttc` is used verbatim.
 
-If the family-name lookup fails, shotsmith prints the directories searched and
-patterns tried so you can fix it.
+If the family-name lookup fails, shotsmith prints the directories
+searched and patterns tried.
+
+## Devices
+
+| Key | ASC slot | Default caption size |
+|---|---|---|
+| `iphone` | iPhone 6.9" Display (1320 × 2868) | 115 |
+| `ipad`   | iPad 13" Display (2064 × 2752) | 130 |
+
+These are Apple's required ASC submission sizes. Apple auto-scales them
+down to smaller iPhone/iPad slots — uploading 6.9" + 13" covers every
+device class. See [Apple's screenshot specifications](https://developer.apple.com/help/app-store-connect/reference/app-information/screenshot-specifications/)
+for the full ASC matrix.
 
 ## Layout model
 
@@ -421,33 +420,20 @@ caption_area_height
 image_area_height = canvas_height − caption_area_height
 ```
 
-The framed PNG is scaled to fit `image_area_height` while preserving aspect
-ratio. The text block (caption + spacing + subtitle) is vertically centered
-within `caption_area_height`.
+The framed PNG is scaled to fit `image_area_height` while preserving
+aspect ratio. The text block (caption + spacing + subtitle) is
+vertically centered within `caption_area_height`.
 
-## Devices
+## Watch screenshots
 
-| Key | ASC slot | Default caption size |
-|---|---|---|
-| `iphone` | iPhone 6.9" Display (1320 × 2868) | 115 |
-| `ipad`   | iPad 13" Display (2064 × 2752) | 130 |
+shotsmith never composes Apple Watch screenshots. ASC submissions go
+straight from `simctl io screenshot` (raw 422×514 native for Ultra 3)
+to the upload payload — no framing, no gradient, no caption. The watch
+hardware's display corner-radius would clip added art at viewing time.
 
-These are Apple's required ASC submission sizes. Apple auto-scales them down
-to smaller iPhone/iPad slots — uploading 6.9" + 13" covers every device class.
-See [Apple's screenshot specifications](https://developer.apple.com/help/app-store-connect/reference/app-information/screenshot-specifications/)
-for the full ASC matrix.
-
-## Tests
-
-```bash
-pip install -r requirements.txt pytest
-pytest tests/
-```
-
-The end-to-end test synthesizes a fake framed PNG, runs the full compose
-pipeline, and asserts output dimensions. Golden-image diffs are deferred —
-shotsmith's output is currently validated by visual inspection during real
-ASC submission rounds.
+For non-ASC marketing needs (web pages, press kits), run `frames-cli`
+on the raw capture rather than maintaining a separate composition
+pipeline.
 
 ## Bundled gradient presets
 
@@ -459,36 +445,54 @@ Three palettes selected during shotsmith's early development, saved at
 - **apple-music** — `#FA2D48` → `#FF6B5C` (deep red → coral, no purple)
 
 All share `dither: 30`, white captions, `New York Small Bold`. See
-[templates/presets/README.md](templates/presets/README.md) for the
-re-rendering recipe and adoption notes.
+[templates/presets/README.md](templates/presets/README.md).
+
+## Tests
+
+```bash
+pip install -r requirements.txt pytest
+pytest tests/
+```
+
+The end-to-end test synthesizes a fake framed PNG, runs the full compose
+pipeline, and asserts output dimensions. Output quality is validated by
+visual inspection during real ASC submission rounds; golden-image diffs
+are not used.
+
+## Claude Code skill
+
+Standalone skill at `skill/SKILL.md` gives any Claude Code session in
+any project native awareness of shotsmith's schema, subcommands, and
+directory contract. Install once:
+
+```bash
+mkdir -p ~/.claude/skills/shotsmith
+ln -s "$(pwd)/skill/SKILL.md" ~/.claude/skills/shotsmith/SKILL.md
+```
 
 ## Roadmap
 
-- **PyPI publication** — pin install command currently uses
+- **PyPI publication** — install command currently uses
   `pipx install git+https://...`; PyPI release once the schema settles
-  via a second project consumer (or external interest surfaces).
+  via a second project consumer or external interest surfaces.
 - **Schema v3** — TBD; no breaking changes planned for v0.2.x. Likely
   drivers: a non-Latin script that exposes shaping gaps in Pillow vs.
-  CoreText, or a project layout that doesn't fit the current
-  per-device input/output template model.
-- **Synthetic surface capture** — replace simulator-based capture of
-  Live Activity / widget / Control Center with SwiftUI `ImageRenderer`
-  scenes. See the project that gave shotsmith its origin (the
-  [xoloUno iOS project playbook](https://github.com/xoloUno/claude-code-ios-playbook))
-  for the agent-driven manual-capture loop that's the simpler
-  alternative — pursued there first.
+  CoreText, or a project layout that doesn't fit the per-device
+  input/output template model.
 
 ## Why not appshot?
 
-shotsmith's predecessor pipeline used `appshot-cli` for caption + gradient
-composition, but the install required a 22-line monkey-patch
-(`patch-appshot.sh`) to override the built-in iPhone/iPad font-size strategy
-— captions rendered illegibly small at ASC sizes otherwise. The patch had to
-be re-applied after every `npm install -g appshot-cli`. shotsmith eliminates
-the patch by exposing font size directly in the config.
+shotsmith's predecessor pipeline used `appshot-cli` for caption +
+gradient composition, but the install required a 22-line monkey-patch
+(`patch-appshot.sh`) to override the built-in iPhone/iPad font-size
+strategy — captions rendered illegibly small at ASC sizes otherwise.
+The patch had to be re-applied after every `npm install -g
+appshot-cli`. shotsmith eliminates the patch by exposing font size
+directly in the config.
 
 ## Why keep frames-cli?
 
-`frames-cli` (viticci's port of MacStories' Apple Frames) handles the device
-bezel layer well and is independently maintained. shotsmith takes its output
-as input and adds the gradient + caption — separation of concerns.
+[`frames-cli`](https://github.com/viticci/frames-cli) (viticci's port
+of MacStories' Apple Frames) handles the device bezel layer well and
+is independently maintained. shotsmith takes its output as input and
+adds the gradient + caption — separation of concerns.
