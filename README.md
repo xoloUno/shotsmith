@@ -1,7 +1,7 @@
 # shotsmith
 
 App Store screenshot composer: gradients, captions, multi-locale. Takes
-already-framed PNGs (from `frames-cli` or any other framer) and produces
+already-framed PNGs (from [`frames-cli`](https://github.com/viticci/frames-cli)) and produces
 ASC-ready submission images. Pure Python, single dependency (Pillow), wraps
 `frames-cli` for device bezels.
 
