@@ -63,6 +63,13 @@ class Pipeline:
     frames_cli: str           # command on PATH (default "frames")
     frames_args: list[str]    # extra args to frames-cli invocation
     verify_strict: bool       # True = pipeline aborts on verify errors; False = warn-only
+    # Narrower, independent gate from verify_strict. When True, the pipeline
+    # aborts if pre-verify produces any dimension warnings (framed PNG dims
+    # differ from the DeviceProfile default). Default False to preserve the
+    # existing legitimate-warning behavior (consumers may capture on a
+    # different sim than the DeviceProfile default and still ship correct
+    # composed output).
+    verify_strict_dimensions: bool = False
 
 
 @dataclass(frozen=True)
@@ -144,7 +151,9 @@ class Config:
         device_block = self.manual_inputs.for_device(device_key)
         if device_block is None:
             return None
-        return self.resolve(device_block.source.format(locale=locale))
+        return self.resolve(
+            device_block.source.format(locale=locale, device=device_key)
+        )
 
     def _device_subdir(self, device_key: str, locale: str, sub: str) -> Path:
         template = self.input_paths.get(device_key)
@@ -315,6 +324,7 @@ def _build(raw: dict, config_dir: Path) -> Config:
             frames_cli=pl_raw.get("frames_cli", "frames"),
             frames_args=list(pl_raw.get("frames_args", [])),
             verify_strict=bool(pl_raw.get("verify_strict", True)),
+            verify_strict_dimensions=bool(pl_raw.get("verify_strict_dimensions", False)),
         )
 
     subtitle: SubtitleStyle | None = None

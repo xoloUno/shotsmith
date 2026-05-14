@@ -15,15 +15,17 @@ import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from . import devices
 from .captions import Captions, CaptionsError
 from .compose import ComposeResult, compose_locale
 from .config import Config
 from .frame import FrameError, FrameResult, frame_locale
+from .passthrough import PassthroughError, PassthroughResult, passthrough_locale
 from .stage import StageResult, stage_locale
-from .verify import VerifyReport, format_report, verify
+from .verify import VerifyReport, VerifyWarning, format_report, verify
 
-VALID_STEPS = ("capture", "stage", "frame", "compose")
-DEFAULT_STEPS = ("stage", "frame", "compose")
+VALID_STEPS = ("capture", "stage", "frame", "passthrough", "compose")
+DEFAULT_STEPS = ("stage", "frame", "passthrough", "compose")
 
 
 class PipelineError(RuntimeError):
@@ -36,6 +38,7 @@ class PipelineResult:
     capture_results: list[tuple[str, str, int]] = field(default_factory=list)  # (device, locale, exit_code)
     stage_results: list[StageResult] = field(default_factory=list)
     frame_results: list[FrameResult] = field(default_factory=list)
+    passthrough_results: list[PassthroughResult] = field(default_factory=list)
     compose_results: list[ComposeResult] = field(default_factory=list)
 
 
@@ -56,6 +59,16 @@ def run(
     device_keys = device_keys or config.device_keys()
     locales = locales or config.locales
 
+    # Split device lanes. Frame and compose only run for composed devices
+    # (iphone, ipad). Passthrough runs only for passthrough devices (watch).
+    # Stage and capture apply to all — they're upstream of the split.
+    composed_keys = [
+        k for k in device_keys if not devices.get(k).passthrough
+    ]
+    passthrough_keys = [
+        k for k in device_keys if devices.get(k).passthrough
+    ]
+
     result = PipelineResult(verify_report=VerifyReport())
 
     # Verify always runs. Errors abort iff pipeline.verify_strict is true.
@@ -68,6 +81,21 @@ def run(
         raise PipelineError(
             f"verify failed (strict mode):\n{format_report(pre_verify)}"
         )
+
+    # Independent narrower gate: dimension warnings → abort. Distinct from
+    # verify_strict (which only gates errors) so consumers can opt into CI
+    # failure on off-spec framed dims without changing the broader strict-
+    # errors semantics. See README "Verify strictness" for the two knobs.
+    strict_dims = (
+        config.pipeline is not None and config.pipeline.verify_strict_dimensions
+    )
+    if strict_dims:
+        dim_warnings = pre_verify.warnings_of_kind("dimensions")
+        if dim_warnings:
+            lines = "\n".join(f"⚠️  {w}" for w in dim_warnings)
+            raise PipelineError(
+                f"verify failed (strict dimensions):\n{lines}"
+            )
 
     if "capture" in steps:
         if config.pipeline is None or not config.pipeline.capture_hook:
@@ -108,7 +136,7 @@ def run(
                     )
 
     if "frame" in steps:
-        for device_key in device_keys:
+        for device_key in composed_keys:
             for locale in locales:
                 try:
                     fr = frame_locale(
@@ -119,13 +147,25 @@ def run(
                 except FrameError as e:
                     raise PipelineError(f"frame failed: {e}") from e
 
-    if "compose" in steps:
+    if "passthrough" in steps:
+        for device_key in passthrough_keys:
+            for locale in locales:
+                try:
+                    pr = passthrough_locale(
+                        config, locale=locale, device_key=device_key,
+                        force=force_frame, dry_run=dry_run,
+                    )
+                    result.passthrough_results.append(pr)
+                except PassthroughError as e:
+                    raise PipelineError(f"passthrough failed: {e}") from e
+
+    if "compose" in steps and composed_keys:
         try:
             captions = Captions.load(config.resolve(config.captions_file))
         except CaptionsError as e:
             raise PipelineError(f"captions load failed: {e}") from e
 
-        for device_key in device_keys:
+        for device_key in composed_keys:
             for locale in locales:
                 try:
                     cr = compose_locale(
@@ -136,9 +176,10 @@ def run(
                 except FileNotFoundError as e:
                     # Surface as warning, not pipeline failure — verify already
                     # told the user about missing inputs.
-                    result.verify_report.warnings.append(
-                        f"compose skipped {device_key}/{locale}: {e}"
-                    )
+                    result.verify_report.warnings.append(VerifyWarning(
+                        kind="compose_skip",
+                        text=f"compose skipped {device_key}/{locale}: {e}",
+                    ))
 
     return result
 

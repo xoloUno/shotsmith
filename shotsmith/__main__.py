@@ -11,6 +11,7 @@ from .captions import Captions, CaptionsError
 from .compose import ComposeResult, compose_locale
 from .config import Config, ConfigError, load as load_config
 from .frame import FrameError, FrameResult, frame_locale
+from .passthrough import PassthroughError, PassthroughResult, passthrough_locale
 from .pipeline import DEFAULT_STEPS, VALID_STEPS, PipelineError, run as run_pipeline
 from .stage import StageResult, stage_locale
 from .verify import format_report, verify
@@ -66,8 +67,33 @@ def main(argv: list[str] | None = None) -> int:
         help="Print what would be staged without copying.",
     )
 
+    p_passthrough = sub.add_parser(
+        "passthrough",
+        help=(
+            "Copy raw/ → output/ for passthrough devices (e.g. watch). "
+            "Bypasses frame + compose. No-op without a passthrough device in config."
+        ),
+    )
+    add_common_filters(p_passthrough)
+    p_passthrough.add_argument(
+        "--force", action="store_true",
+        help="Re-copy PNGs even if output/ already contains them.",
+    )
+    p_passthrough.add_argument(
+        "--dry-run", action="store_true",
+        help="Print what would be copied without writing.",
+    )
+
     p_verify = sub.add_parser("verify", help="Validate raw/+framed/+composed/ directory contract")
     add_common_filters(p_verify)
+    p_verify.add_argument(
+        "--strict", action="store_true",
+        help=(
+            "Escalate every warning to an error and exit nonzero if any are "
+            "present. CLI equivalent of pipeline.verify_strict_dimensions=true "
+            "but broader (all warning kinds, not just dimensions)."
+        ),
+    )
 
     p_pipeline = sub.add_parser(
         "pipeline", help="Run capture (optional) → frame → compose end-to-end"
@@ -97,6 +123,8 @@ def main(argv: list[str] | None = None) -> int:
         return _cmd_frame(args)
     if args.command == "stage":
         return _cmd_stage(args)
+    if args.command == "passthrough":
+        return _cmd_passthrough(args)
     if args.command == "verify":
         return _cmd_verify(args)
     if args.command == "pipeline":
@@ -123,7 +151,12 @@ def _cmd_compose(args) -> int:
         return 2
 
     locales = args.locale or config.locales
-    device_keys = args.device or config.device_keys()
+    # Compose only applies to composed devices. Filter passthrough out unless
+    # the user explicitly asked for them (in which case compose_locale will
+    # raise with an actionable message).
+    device_keys = args.device or [
+        k for k in config.device_keys() if not devices.get(k).passthrough
+    ]
 
     total_written = 0
     total_skipped = 0
@@ -149,7 +182,10 @@ def _cmd_compose(args) -> int:
 def _cmd_frame(args) -> int:
     config = _load_or_die(args.config)
     locales = args.locale or config.locales
-    device_keys = args.device or config.device_keys()
+    # Frame only applies to composed devices. Same filter rationale as compose.
+    device_keys = args.device or [
+        k for k in config.device_keys() if not devices.get(k).passthrough
+    ]
 
     total_written = 0
     total_skipped = 0
@@ -203,11 +239,54 @@ def _cmd_stage(args) -> int:
     return 0
 
 
+def _cmd_passthrough(args) -> int:
+    config = _load_or_die(args.config)
+    locales = args.locale or config.locales
+    # Passthrough applies only to passthrough devices. With no explicit filter,
+    # iterate any passthrough device declared in config.
+    device_keys = args.device or [
+        k for k in config.device_keys() if devices.get(k).passthrough
+    ]
+    if not device_keys:
+        print("ℹ️  No passthrough devices declared in config — passthrough is a no-op.")
+        return 0
+
+    total_written = 0
+    total_skipped = 0
+    for device_key in device_keys:
+        for locale in locales:
+            try:
+                result = passthrough_locale(
+                    config, locale=locale, device_key=device_key,
+                    force=args.force, dry_run=args.dry_run,
+                )
+            except PassthroughError as e:
+                print(f"❌ {device_key}/{locale}: {e}", file=sys.stderr)
+                return 1
+            _print_passthrough_result(result, dry_run=args.dry_run)
+            total_written += len(result.written)
+            total_skipped += len(result.skipped)
+
+    verb = "would pass through" if args.dry_run else "passed through"
+    print(f"\n✅ Done. {verb} {total_written} image(s); skipped {total_skipped}.")
+    return 0
+
+
 def _cmd_verify(args) -> int:
     config = _load_or_die(args.config)
     locales = args.locale or config.locales
     device_keys = args.device or config.device_keys()
     report = verify(config, device_keys=device_keys, locales=locales)
+
+    # --strict: every warning becomes an error before formatting. We keep the
+    # original message but prefix it so the user sees that it was escalated
+    # rather than emitted as an error directly.
+    if getattr(args, "strict", False) and report.warnings:
+        for w in report.warnings:
+            kind = getattr(w, "kind", "warning")
+            report.errors.append(f"[strict: {kind}] {w}")
+        report.warnings = []
+
     print(format_report(report))
     if report.errors:
         return 2
@@ -241,6 +320,11 @@ def _cmd_pipeline(args) -> int:
         for fr in result.frame_results:
             _print_frame_result(fr, dry_run=args.dry_run)
 
+    if result.passthrough_results:
+        print("\n— passthrough —")
+        for pr in result.passthrough_results:
+            _print_passthrough_result(pr, dry_run=args.dry_run)
+
     if result.compose_results:
         print("\n— compose —")
         for cr in result.compose_results:
@@ -263,6 +347,15 @@ def _print_frame_result(result: FrameResult, dry_run: bool) -> None:
     label = f"{result.device}/{result.locale}"
     if result.written:
         verb = "would frame" if dry_run else "framed"
+        print(f"  {label}: {verb} {len(result.written)} image(s)")
+    for filename, reason in result.skipped:
+        print(f"  {label}: skipped {filename} ({reason})")
+
+
+def _print_passthrough_result(result: PassthroughResult, dry_run: bool) -> None:
+    label = f"{result.device}/{result.locale}"
+    if result.written:
+        verb = "would pass through" if dry_run else "passed through"
         print(f"  {label}: {verb} {len(result.written)} image(s)")
     for filename, reason in result.skipped:
         print(f"  {label}: skipped {filename} ({reason})")

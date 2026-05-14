@@ -27,10 +27,34 @@ from . import devices
 from .config import Config
 
 
+class VerifyWarning(str):
+    """A verify warning tagged with a `kind` taxonomy.
+
+    Subclasses `str` so existing consumers — f-strings, substring tests
+    (`"dimensions" in w`), iteration in test assertions — keep working
+    without code changes. The `kind` attribute lets callers filter
+    by category (e.g. only dimension warnings) instead of substring-
+    matching the message text.
+
+    Known kinds (extend as new warning sites appear):
+      - "raw_missing"      : raw/ dir absent or empty
+      - "framed_missing"   : framed/ dir absent or empty
+      - "dimensions"       : framed PNG dimensions differ from device profile default
+      - "compose_skip"     : compose step skipped a (device, locale) at pipeline level
+    """
+    __slots__ = ("kind",)
+    kind: str
+
+    def __new__(cls, kind: str, text: str) -> "VerifyWarning":
+        instance = super().__new__(cls, text)
+        instance.kind = kind
+        return instance
+
+
 @dataclass
 class VerifyReport:
     errors: list[str] = field(default_factory=list)
-    warnings: list[str] = field(default_factory=list)
+    warnings: list[VerifyWarning] = field(default_factory=list)
 
     @property
     def ok(self) -> bool:
@@ -39,6 +63,9 @@ class VerifyReport:
     def merge(self, other: "VerifyReport") -> None:
         self.errors.extend(other.errors)
         self.warnings.extend(other.warnings)
+
+    def warnings_of_kind(self, kind: str) -> list[VerifyWarning]:
+        return [w for w in self.warnings if getattr(w, "kind", None) == kind]
 
 
 def verify(
@@ -105,19 +132,50 @@ def _verify_one(
                     )
 
     # raw/ presence — warning, not error (capture step may not have run yet)
-    if not raw_dir.is_dir() or not list(raw_dir.glob("*.png")):
-        report.warnings.append(
-            f"{device_key}/{locale}: raw/ is missing or empty at {raw_dir}. "
-            f"Run capture (XCUITest or your project's capture script) first."
-        )
+    raw_pngs = sorted(raw_dir.glob("*.png")) if raw_dir.is_dir() else []
+    if not raw_pngs:
+        report.warnings.append(VerifyWarning(
+            kind="raw_missing",
+            text=(
+                f"{device_key}/{locale}: raw/ is missing or empty at {raw_dir}. "
+                f"Run capture (XCUITest or your project's capture script) first."
+            ),
+        ))
+
+    # Passthrough devices (e.g. watch) don't go through frame + compose. Verify
+    # their raw/ dimensions instead — the raw screen size IS the submitted
+    # ASC size. No framed/ dir to inspect.
+    if device.passthrough:
+        for png in raw_pngs:
+            try:
+                with Image.open(png) as img:
+                    w, h = img.size
+            except Exception as e:
+                report.errors.append(f"{png}: failed to open ({e})")
+                continue
+            if (w, h) != (device.width, device.height):
+                report.warnings.append(VerifyWarning(
+                    kind="dimensions",
+                    text=(
+                        f"{png}: dimensions {w}x{h} differ from expected raw "
+                        f"screen size {device.width}x{device.height} for "
+                        f"{device_key} ({device.name}). Likely fine if you're "
+                        f"capturing on a different watch sim; ASC will accept "
+                        f"matching submitted screenshots regardless."
+                    ),
+                ))
+        return report
 
     # framed/ presence — warning, not error
     framed_pngs = sorted(framed_dir.glob("*.png")) if framed_dir.is_dir() else []
     if not framed_pngs:
-        report.warnings.append(
-            f"{device_key}/{locale}: framed/ is missing or empty at {framed_dir}. "
-            f"Run `shotsmith frame --config X --device {device_key} --locale {locale}`."
-        )
+        report.warnings.append(VerifyWarning(
+            kind="framed_missing",
+            text=(
+                f"{device_key}/{locale}: framed/ is missing or empty at {framed_dir}. "
+                f"Run `shotsmith frame --config X --device {device_key} --locale {locale}`."
+            ),
+        ))
         return report  # nothing to inspect inside framed/
 
     # Inspect each framed PNG.
@@ -149,12 +207,15 @@ def _verify_one(
         # the "matches ASC composed size" check above, which catches the
         # actual bug class (prior composition placed into framed/).
         if (w, h) != (device.framed_width, device.framed_height):
-            report.warnings.append(
-                f"{png}: dimensions {w}x{h} differ from default frames-cli "
-                f"output {device.framed_width}x{device.framed_height} for "
-                f"{device_key}. Likely fine if you're capturing on a different "
-                f"sim than the DeviceProfile default."
-            )
+            report.warnings.append(VerifyWarning(
+                kind="dimensions",
+                text=(
+                    f"{png}: dimensions {w}x{h} differ from default frames-cli "
+                    f"output {device.framed_width}x{device.framed_height} for "
+                    f"{device_key}. Likely fine if you're capturing on a different "
+                    f"sim than the DeviceProfile default."
+                ),
+            ))
 
         # Note: we don't flag transparency in framed/. Some frames-cli variants
         # legitimately output RGBA with transparent borders surrounding the

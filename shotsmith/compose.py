@@ -48,6 +48,11 @@ def compose_locale(
 ) -> ComposeResult:
     """Compose all screenshots for one locale + device combination."""
     device = devices.get(device_key)
+    if device.passthrough:
+        raise ValueError(
+            f"Device '{device_key}' is a passthrough device. "
+            f"Use `shotsmith passthrough` — compose doesn't apply."
+        )
 
     output_template = config.output_paths.get(device_key)
     if not output_template:

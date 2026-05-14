@@ -183,3 +183,99 @@ def test_verify_format_report_summarizes():
     assert "warning(s)" in verify_mod.format_report(report)
     report.errors.append("an error")
     assert "❌" in verify_mod.format_report(report)
+
+
+# ---------- S3: VerifyWarning taxonomy + strict dimensions ----------
+
+
+def test_verify_warning_carries_kind_taxonomy(tmp_path):
+    """Warnings are tagged with a `kind` for filtering by category.
+
+    Adopted per shotsmith-session-report-2026-05-08 (S3) to enable
+    pipeline.verify_strict_dimensions gate without substring matching.
+    """
+    cfg = config_mod.load(_write_config(tmp_path))
+    framed_dir = cfg.framed_dir("iphone", "en-US")
+    _make_png(framed_dir / "01.png", (999, 999))
+    report = verify_mod.verify(cfg)
+
+    dim_warnings = report.warnings_of_kind("dimensions")
+    assert len(dim_warnings) == 1
+    assert "differ from default" in dim_warnings[0]
+
+    # raw_missing warning also present and tagged distinctly
+    raw_warnings = report.warnings_of_kind("raw_missing")
+    assert len(raw_warnings) == 1
+
+
+def test_verify_strict_cli_escalates_warnings_to_errors(tmp_path, capsys):
+    """`shotsmith verify --strict` turns every warning into a (prefixed) error.
+
+    Reported in shotsmith-session-report-2026-05-08 (S3): consumers want CI
+    to fail on dimension warnings without grepping stderr. --strict gives
+    them that as a CLI flag without forcing a config change.
+    """
+    from shotsmith.__main__ import main as cli_main
+
+    cfg_path = _write_config(tmp_path)
+    framed_dir = config_mod.load(cfg_path).framed_dir("iphone", "en-US")
+    _make_png(framed_dir / "01.png", (999, 999))  # off-spec → dimension warning
+
+    # Without --strict: warnings stay warnings, exit 1 (the existing contract).
+    rc = cli_main(["verify", "--config", str(cfg_path)])
+    captured = capsys.readouterr()
+    assert rc == 1, f"expected warnings-only exit 1, got {rc}\n{captured.out}"
+    assert "⚠️" in captured.out
+
+    # With --strict: same warnings become errors, exit 2.
+    rc = cli_main(["verify", "--config", str(cfg_path), "--strict"])
+    captured = capsys.readouterr()
+    assert rc == 2, f"expected strict-escalated exit 2, got {rc}\n{captured.out}"
+    assert "[strict: dimensions]" in captured.out
+
+
+def test_verify_passthrough_device_warns_on_off_spec_dimensions(tmp_path):
+    """Per S1: verify checks raw dims for passthrough devices (e.g. watch)."""
+    raw = json.loads(_write_config(tmp_path).read_text())
+    raw["input"]["watch"] = "input/watch/{locale}"
+    raw["output"]["watch"] = "output/watch/{locale}"
+    (tmp_path / "config.json").write_text(json.dumps(raw))
+    cfg = config_mod.load(tmp_path / "config.json")
+
+    watch_raw = cfg.raw_dir("watch", "en-US")
+    _make_png(watch_raw / "01.png", (200, 200))  # off-spec — expected 422x514
+
+    report = verify_mod.verify(cfg, device_keys=["watch"])
+    assert any(
+        getattr(w, "kind", None) == "dimensions" and "differ from expected raw" in w
+        for w in report.warnings
+    )
+
+
+def test_verify_passthrough_device_clean_at_expected_dimensions(tmp_path):
+    raw = json.loads(_write_config(tmp_path).read_text())
+    raw["input"]["watch"] = "input/watch/{locale}"
+    raw["output"]["watch"] = "output/watch/{locale}"
+    (tmp_path / "config.json").write_text(json.dumps(raw))
+    cfg = config_mod.load(tmp_path / "config.json")
+
+    watch_raw = cfg.raw_dir("watch", "en-US")
+    _make_png(watch_raw / "01.png", (422, 514))  # matches DEVICES["watch"]
+
+    report = verify_mod.verify(cfg, device_keys=["watch"])
+    # No dimension warnings; raw_missing warnings are gone because raw has files.
+    dim_warnings = report.warnings_of_kind("dimensions")
+    assert dim_warnings == []
+    assert not any("framed/" in w for w in report.warnings)  # no framed/ check for passthrough
+
+
+def test_verify_warning_is_str_for_backward_compat(tmp_path):
+    """VerifyWarning subclasses str — old `"X" in w` style code keeps working."""
+    cfg = config_mod.load(_write_config(tmp_path))
+    framed_dir = cfg.framed_dir("iphone", "en-US")
+    _make_png(framed_dir / "01.png", (999, 999))
+    report = verify_mod.verify(cfg)
+    for w in report.warnings:
+        assert isinstance(w, str)
+    # Substring containment still works.
+    assert any("differ" in w for w in report.warnings)

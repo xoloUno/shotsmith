@@ -22,8 +22,11 @@ from shotsmith import pipeline as pipeline_mod  # noqa: E402
 def _write_config(
     tmp_path: Path, capture_hook: str | None = None,
     verify_strict: bool = True,
+    verify_strict_dimensions: bool = False,
 ) -> Path:
-    pl = {"frames_cli": "frames", "verify_strict": verify_strict}
+    pl: dict = {"frames_cli": "frames", "verify_strict": verify_strict}
+    if verify_strict_dimensions:
+        pl["verify_strict_dimensions"] = True
     if capture_hook is not None:
         pl["capture_hook"] = capture_hook
     cfg = {
@@ -207,8 +210,85 @@ def test_pipeline_stage_aborts_on_missing_source(tmp_path):
         pipeline_mod.run(cfg, steps=("stage",))
 
 
+def test_pipeline_routes_passthrough_devices_to_passthrough_step(tmp_path, monkeypatch):
+    """Per S1: when a passthrough device is in scope, pipeline runs the
+    passthrough step on it and skips frame + compose. Composed devices
+    coexist normally.
+    """
+    raw = json.loads(_write_config(tmp_path, verify_strict=False).read_text())
+    raw["input"]["watch"] = "input/watch/{locale}"
+    raw["output"]["watch"] = "output/watch/{locale}"
+    (tmp_path / "config.json").write_text(json.dumps(raw))
+    cfg = config_mod.load(tmp_path / "config.json")
+    bin_dir = _install_fake_frames(tmp_path)
+    monkeypatch.setenv("PATH", f"{bin_dir}:{os.environ['PATH']}")
+
+    # Both lanes populated.
+    iphone_raw = cfg.raw_dir("iphone", "en-US")
+    watch_raw = cfg.raw_dir("watch", "en-US")
+    _make_raw(iphone_raw / "01.png")
+    watch_raw.mkdir(parents=True, exist_ok=True)
+    Image.new("RGB", (422, 514), (10, 10, 10)).save(watch_raw / "01.png")
+
+    result = pipeline_mod.run(cfg, steps=("frame", "passthrough", "compose"))
+
+    # Composed lane: iPhone went through frame + compose.
+    assert len(result.frame_results) == 1
+    assert result.frame_results[0].device == "iphone"
+    assert len(result.compose_results) == 1
+    assert result.compose_results[0].device == "iphone"
+
+    # Passthrough lane: watch landed in output untouched.
+    assert len(result.passthrough_results) == 1
+    assert result.passthrough_results[0].device == "watch"
+    out_watch = cfg.resolve("output/watch/en-US") / "01.png"
+    assert out_watch.is_file()
+    # Watch never went through frame or compose.
+    assert not any(fr.device == "watch" for fr in result.frame_results)
+    assert not any(cr.device == "watch" for cr in result.compose_results)
+
+
+def test_pipeline_verify_strict_dimensions_aborts_on_warning(tmp_path):
+    """Per shotsmith-session-report-2026-05-08 (S3): a new narrow gate.
+
+    pipeline.verify_strict (errors only) is unchanged; this independent flag
+    abort on dimension warnings specifically. Lets CI fail on off-spec
+    framed dimensions without broadening the existing verify_strict scope.
+    """
+    cfg = config_mod.load(_write_config(
+        tmp_path, verify_strict=False, verify_strict_dimensions=True,
+    ))
+    framed_dir = cfg.framed_dir("iphone", "en-US")
+    framed_dir.mkdir(parents=True)
+    # Off-spec framed dims → dimension warning.
+    Image.new("RGB", (999, 999)).save(framed_dir / "01.png")
+
+    with pytest.raises(pipeline_mod.PipelineError, match="strict dimensions"):
+        pipeline_mod.run(cfg, steps=("compose",))
+
+
+def test_pipeline_verify_strict_dimensions_default_false_does_not_abort(tmp_path):
+    """Regression guard: pre-existing consumers without the new flag are unaffected.
+
+    The default verify_strict_dimensions=False must preserve the legitimate-
+    warning behavior (capturing on a non-default sim ships fine).
+    """
+    cfg = config_mod.load(_write_config(tmp_path, verify_strict=False))
+    framed_dir = cfg.framed_dir("iphone", "en-US")
+    framed_dir.mkdir(parents=True)
+    Image.new("RGB", (999, 999)).save(framed_dir / "01.png")
+
+    # Should not raise — dimension warnings stay warnings under default settings.
+    result = pipeline_mod.run(cfg, steps=("compose",))
+    assert any(
+        getattr(w, "kind", None) == "dimensions"
+        for w in result.verify_report.warnings
+    )
+
+
 def test_pipeline_default_steps_includes_stage(tmp_path):
     # Defensive: the public DEFAULT_STEPS contract changed in this revision.
     # Keep this test so anyone reordering steps notices.
-    assert pipeline_mod.DEFAULT_STEPS == ("stage", "frame", "compose")
+    assert pipeline_mod.DEFAULT_STEPS == ("stage", "frame", "passthrough", "compose")
     assert "stage" in pipeline_mod.VALID_STEPS
+    assert "passthrough" in pipeline_mod.VALID_STEPS

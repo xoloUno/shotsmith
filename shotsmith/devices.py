@@ -14,11 +14,20 @@ from dataclasses import dataclass
 class DeviceProfile:
     name: str
     asc_category: str
-    width: int                  # ASC submission slot width
-    height: int                 # ASC submission slot height
-    framed_width: int           # frames-cli output width (verify checks this)
-    framed_height: int          # frames-cli output height
-    default_caption_size: int
+    # For composed devices: ASC submission slot dimensions.
+    # For passthrough devices: the raw screen dimensions (= submitted size).
+    width: int
+    height: int
+    # frames-cli's output dimensions (used by verify to check framed/ PNGs).
+    # None for passthrough devices, which never go through frames-cli.
+    framed_width: int | None = None
+    framed_height: int | None = None
+    default_caption_size: int | None = None
+    # True for devices that bypass frame + compose. shotsmith's `passthrough`
+    # step just copies raw/ → output/ unmodified. Today: Apple Watch — its
+    # hardware corner-radius would clip composed bezel art at viewing time, so
+    # ASC accepts raw screen PNGs (e.g. 422×514 for Watch Ultra 3 49mm).
+    passthrough: bool = False
 
 
 # framed_* values come from frames-cli's actual output dimensions.
@@ -43,6 +52,16 @@ DEVICES: dict[str, DeviceProfile] = {
         framed_width=2228,
         framed_height=3084,
         default_caption_size=130,
+    ),
+    "watch": DeviceProfile(
+        name="Apple Watch Ultra 3 (49mm)",
+        asc_category="Apple Watch Ultra (49mm)",
+        # Raw screen dims for Watch Ultra 3 49mm — also the ASC submitted
+        # size. No framing, no caption, no gradient: the hardware corner
+        # radius would clip composed bezel art at viewing time.
+        width=422,
+        height=514,
+        passthrough=True,
     ),
 }
 

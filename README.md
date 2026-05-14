@@ -6,7 +6,8 @@ ASC-ready submission images. Pure Python, single dependency (Pillow), wraps
 `frames-cli` for device bezels.
 
 **v0.2.0** — iPhone 6.9" + iPad 13", multi-locale, manual-input staging.
-Apple Watch is intentionally out of scope (see [Watch screenshots](#watch-screenshots)).
+Apple Watch ships via passthrough — raw screenshots flow through to ASC unmodified
+(see [Watch screenshots](#watch-screenshots)).
 
 ## TL;DR
 
@@ -98,33 +99,39 @@ shotsmith --version
 
 ## Usage
 
-Five subcommands. All take `--config`, `--locale` (repeatable), `--device`
+Six subcommands. All take `--config`, `--locale` (repeatable), `--device`
 (repeatable). With no filter flags, every (device × locale) combination runs.
 
 ```bash
 # Stage manual_inputs sources into raw/ (no-op without manual_inputs config)
 shotsmith stage    --config path/to/config.json
 
-# Frame — wraps frames-cli, reads raw/, writes framed/
+# Frame — wraps frames-cli, reads raw/, writes framed/ (composed devices only)
 shotsmith frame    --config path/to/config.json
 shotsmith frame    --config path/to/config.json --force   # re-frame existing
 
-# Compose — reads framed/, writes ASC-ready PNGs
+# Passthrough — raw/ → output/ for devices that bypass compose (e.g. watch)
+shotsmith passthrough --config path/to/config.json
+shotsmith passthrough --config path/to/config.json --locale en-US --force
+
+# Compose — reads framed/, writes ASC-ready PNGs (composed devices only)
 shotsmith compose  --config path/to/config.json
 shotsmith compose  --config path/to/config.json --locale en-US --device iphone --dry-run
 
 # Verify the directory contract
 shotsmith verify   --config path/to/config.json
+shotsmith verify   --config path/to/config.json --strict   # warnings → errors (CI use)
 
-# Pipeline — verify, then stage + frame + compose end-to-end
+# Pipeline — verify, then stage + frame + passthrough + compose end-to-end
 shotsmith pipeline --config path/to/config.json
-shotsmith pipeline --config path/to/config.json --steps capture,stage,frame,compose
+shotsmith pipeline --config path/to/config.json --steps capture,stage,frame,passthrough,compose
 shotsmith pipeline --config path/to/config.json --steps compose   # just re-render
 ```
 
-`pipeline --steps` defaults to `stage,frame,compose`. Add `capture` if your
-config defines a `pipeline.capture_hook`. The `stage` step is a no-op
-without a `manual_inputs` block.
+`pipeline --steps` defaults to `stage,frame,passthrough,compose`. Add
+`capture` if your config defines a `pipeline.capture_hook`. The `stage`
+step is a no-op without a `manual_inputs` block; `passthrough` is a no-op
+without a passthrough device (today: `watch`) in the config.
 
 ## Directory contract
 
@@ -242,9 +249,23 @@ reports a hard error when a declared source file is missing:
 }
 ```
 
-Per device. `source` is config-relative and supports `{locale}`. Files
-typically use the conventional `90/91/92_` prefix; pair with
-`input_mapping` to rename them to canonical caption keys at frame time.
+Per device. `source` is config-relative and supports `{locale}` and
+`{device}` placeholders. Files typically use the conventional `90/91/92_`
+prefix; pair with `input_mapping` to rename them to canonical caption
+keys at frame time.
+
+**Symmetric multi-device layout.** When iPhone and iPad both carry manual
+surfaces, share one template and let `{device}` route per surface:
+
+```json
+"manual_inputs": {
+  "iphone": { "source": "../manual-captures/{locale}/{device}", "files": [...] },
+  "ipad":   { "source": "../manual-captures/{locale}/{device}", "files": [...] }
+}
+```
+
+Source files then live at `../manual-captures/<locale>/iphone/` and
+`../manual-captures/<locale>/ipad/` with no per-device hardcoding.
 
 **Why declare them in config rather than handle staging in your Fastfile/script?**
 
@@ -273,6 +294,7 @@ Adds the `frame`, `verify`, and `pipeline` subcommands. Without it, only
 | `frames_cli` | `"frames"` | Command name for frames-cli on PATH. |
 | `frames_args` | `[]` | Extra args appended to every frames-cli invocation. |
 | `verify_strict` | `true` | Pipeline aborts on verify errors. Set `false` to downgrade errors to warnings. |
+| `verify_strict_dimensions` | `false` | Independent narrower gate: pipeline aborts on dimension warnings (framed PNG dims differ from the DeviceProfile default). Off by default because frames-cli output dims legitimately vary by capture sim; opt in when your CI captures on a fixed sim and any drift means something broke. |
 
 `background.dither` is an optional Gaussian-noise sigma applied to the
 gradient — a subtle film-grain overlay that breaks up gradient banding on
@@ -445,14 +467,34 @@ vertically centered within `caption_area_height`.
 
 ## Watch screenshots
 
-shotsmith never composes Apple Watch screenshots. ASC submissions go
-straight from `simctl io screenshot` (raw 422×514 native for Ultra 3)
-to the upload payload — no framing, no gradient, no caption. The watch
-hardware's display corner-radius would clip added art at viewing time.
+shotsmith never composes Apple Watch screenshots — the hardware display
+corner-radius would clip added art at viewing time. ASC accepts raw
+screen PNGs (e.g. 422×514 for Watch Ultra 3 49mm) directly, so the
+shipping pipeline is a copy, not a composition.
 
-For non-ASC marketing needs (web pages, press kits), run `frames-cli`
-on the raw capture rather than maintaining a separate composition
-pipeline.
+The `watch` device is registered as a **passthrough device**. Declare it
+in `input` / `output` like any other device:
+
+```json
+"input":  { "iphone": "...", "ipad": "...", "watch": "../screenshots/{locale}/Apple Watch Ultra 3 (49mm)" },
+"output": { "iphone": "...", "ipad": "...", "watch": "../composed/{locale}/Apple Watch Ultra 3 (49mm)" }
+```
+
+`shotsmith pipeline` then routes the watch lane through a dedicated
+`passthrough` step (raw → output, with optional `input_mapping`
+filename canonicalization) while iPhone and iPad continue through
+`frame` + `compose`. `verify` checks watch PNGs against the expected
+422×514 raw screen size and warns on drift.
+
+Run the passthrough step standalone for ad-hoc copies:
+
+```bash
+shotsmith passthrough --config path/to/config.json
+shotsmith passthrough --config path/to/config.json --locale en-US --force
+```
+
+For non-ASC marketing needs (web pages, press kits) you can still run
+`frames-cli` on the raw capture outside shotsmith.
 
 ## Bundled gradient presets
 

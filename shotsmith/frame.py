@@ -59,7 +59,13 @@ def frame_locale(
             "pipeline.frames_cli to be configured."
         )
 
-    devices.get(device_key)  # validates device_key
+    profile = devices.get(device_key)  # validates device_key
+    if profile.passthrough:
+        raise FrameError(
+            f"Device '{device_key}' is a passthrough device. "
+            f"Use `shotsmith passthrough` (or rely on the pipeline's "
+            f"automatic dispatch) — frame doesn't apply."
+        )
     raw_dir = config.raw_dir(device_key, locale)
     framed_dir = config.framed_dir(device_key, locale)
 
@@ -92,8 +98,18 @@ def frame_locale(
             continue
         target_path = framed_dir / canonical_name
         if target_path.exists() and not force:
-            skipped.append((canonical_name, "already framed (pass --force to rebuild)"))
-            continue
+            # `make`-style invalidation: re-frame if the raw source is newer
+            # than the framed output. Otherwise the consumer's refreshed
+            # captures get silently buried under stale framed content, which
+            # then composes into stale marketing PNGs (the "fresh gradient,
+            # stale device bezel" failure mode).
+            if source_path.stat().st_mtime <= target_path.stat().st_mtime:
+                skipped.append((
+                    canonical_name,
+                    "already framed (raw not newer; pass --force to rebuild)",
+                ))
+                continue
+            # raw is newer than framed: fall through and re-frame.
         to_frame.append((source_path, canonical_name))
 
     written: list[Path] = []

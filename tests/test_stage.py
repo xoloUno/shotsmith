@@ -156,6 +156,42 @@ def test_stage_locale_template_expands(tmp_path):
     assert (cfg.raw_dir("iphone", "es-ES") / "90.png").is_file()
 
 
+def test_stage_device_template_expands(tmp_path):
+    """`{device}` in manual_inputs.source expands to the device key.
+
+    Reported in shotsmith-session-report-2026-05-08 (P3, Flara): consumers
+    want a symmetric `manual-captures/{locale}/{device}/` layout without
+    hardcoding iPhone vs iPad subdirs per device block.
+    """
+    cfg_path = _write_config(tmp_path, manual_inputs={
+        "iphone": {
+            "source": "manual-captures/{locale}/{device}",
+            "files": ["90.png"],
+        },
+        "ipad": {
+            "source": "manual-captures/{locale}/{device}",
+            "files": ["90.png"],
+        },
+    })
+    # Add ipad to input/output so the config validates with both devices.
+    raw = json.loads(cfg_path.read_text())
+    raw["input"]["ipad"] = "input/ipad/{locale}"
+    raw["output"]["ipad"] = "output/ipad/{locale}"
+    cfg_path.write_text(json.dumps(raw))
+    cfg = config_mod.load(cfg_path)
+
+    _make_png(tmp_path / "manual-captures" / "en-US" / "iphone" / "90.png")
+    _make_png(tmp_path / "manual-captures" / "en-US" / "ipad" / "90.png")
+
+    iphone = stage_mod.stage_locale(cfg, locale="en-US", device_key="iphone")
+    ipad = stage_mod.stage_locale(cfg, locale="en-US", device_key="ipad")
+
+    assert iphone.written == ["90.png"]
+    assert ipad.written == ["90.png"]
+    assert (cfg.raw_dir("iphone", "en-US") / "90.png").is_file()
+    assert (cfg.raw_dir("ipad", "en-US") / "90.png").is_file()
+
+
 def test_config_rejects_invalid_manual_inputs_shape(tmp_path):
     # source must be a string
     cfg_path = _write_config(tmp_path, manual_inputs={

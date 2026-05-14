@@ -138,6 +138,39 @@ def test_frame_skips_already_framed_unless_force(tmp_path, monkeypatch):
     assert len(result_forced.skipped) == 0
 
 
+def test_frame_reframes_when_raw_newer_than_framed(tmp_path, monkeypatch):
+    """Regression: stale framed/ silently composed under fresh captures.
+
+    Reported in shotsmith-session-report-2026-05-08 (P1, Flara). Without
+    mtime invalidation, refreshing a raw/ capture and re-running the
+    pipeline silently produced composed output with the OLD framed bezel.
+    """
+    cfg = config_mod.load(_write_config(tmp_path))
+    bin_dir = _install_fake_frames(tmp_path)
+    monkeypatch.setenv("PATH", f"{bin_dir}:{os.environ['PATH']}")
+
+    raw_dir = cfg.raw_dir("iphone", "en-US")
+    framed_dir = cfg.framed_dir("iphone", "en-US")
+    framed_dir.mkdir(parents=True, exist_ok=True)
+
+    # Pre-existing framed output at t0.
+    framed_path = framed_dir / "01.png"
+    _make_raw(framed_path)
+    t0 = framed_path.stat().st_mtime
+    os.utime(framed_path, (t0, t0))
+
+    # Raw refreshed at t1 > t0 (consumer recaptured after a source-app fix).
+    raw_path = raw_dir / "01.png"
+    _make_raw(raw_path)
+    t1 = t0 + 10
+    os.utime(raw_path, (t1, t1))
+
+    # Without --force, mtime invalidation should still cause a re-frame.
+    result = frame_mod.frame_locale(cfg, locale="en-US", device_key="iphone")
+    assert len(result.written) == 1, f"expected re-frame, got skipped={result.skipped}"
+    assert len(result.skipped) == 0
+
+
 def test_frame_dry_run_doesnt_invoke_frames_cli(tmp_path):
     cfg = config_mod.load(_write_config(tmp_path, frames_cli="nonexistent-cmd"))
     raw_dir = cfg.raw_dir("iphone", "en-US")
