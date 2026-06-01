@@ -1,0 +1,1 @@
+../../_playbook/packs/python/command-profile.md
