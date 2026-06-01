@@ -1,0 +1,8 @@
+# shotsmith instance facts — read at runtime by the universal /status + /wrapup and the
+# python command-profile.md bridged from _playbook. Declarative facts only, no logic.
+kind: python                 # selects packs/python/command-profile.md
+test_command: pytest -q      # /wrapup pre-commit gate (and a future /test)
+version_files:               # kept in lockstep on a release/version bump
+  - VERSION
+  - pyproject.toml
+  - shotsmith/__init__.py
