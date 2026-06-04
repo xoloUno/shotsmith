@@ -5,6 +5,54 @@ schema-breaking config changes bump the major version.
 
 ---
 
+## Unreleased
+
+Acts on a consumer (Flara) end-to-end regression report against v0.2.0:
+one bug fix, one path-template improvement, two features. No schema break
+— config `version` stays at 2; existing configs run unchanged.
+
+### Fixed
+
+- **`frame` now invalidates stale output by mtime.** Previously the frame
+  step skipped any file already present in `framed/`, so refreshing a
+  `raw/` capture and re-running the pipeline silently composed the *old*
+  device-bezel content under a fresh gradient + caption. `frame` now
+  re-frames when `raw/<f>.png` is newer than `framed/<f>.png` (make-style),
+  no `--force` needed. The same mtime guard applies to the new passthrough
+  step.
+
+### Added
+
+- **Apple Watch passthrough.** A `watch` device is now registered, and a
+  new `passthrough` subcommand copies `raw/` → output unmodified (no
+  framing, no gradient, no caption — the watch corner-radius would clip
+  composed art). Declare `watch` in `input`/`output` and the `pipeline`
+  routes it through a dedicated passthrough lane while iPhone/iPad continue
+  through frame + compose. Honors `input_mapping` for filename
+  canonicalization. Default pipeline steps are now
+  `stage,frame,passthrough,compose` (passthrough is a no-op without a
+  passthrough device). `verify` checks watch raw PNGs against the expected
+  422×514 screen size.
+- **`verify --strict` + `pipeline.verify_strict_dimensions`.** A new CLI
+  flag escalates every verify warning to an error (exit nonzero) for CI
+  use; a new config field aborts the pipeline specifically on dimension
+  warnings. Both are independent of the existing `verify_strict` (which
+  still gates errors only) — no behavior change for configs that don't set
+  them. Verify warnings now carry a `kind` taxonomy internally so the gate
+  filters by category rather than matching message text.
+- **`{device}` placeholder in `manual_inputs.source`.** Expands alongside
+  `{locale}`, enabling a symmetric `manual-captures/{locale}/{device}/`
+  layout without per-device hardcoding.
+
+### Tests
+
+- 101 passing (up from v0.2.0's 83), adding coverage for mtime
+  re-framing, `{device}` expansion, the warning taxonomy, `verify --strict`,
+  the `verify_strict_dimensions` pipeline gate, and the passthrough
+  copy / mtime / input-mapping / dry-run / lane-routing paths.
+
+---
+
 ## v0.2.0 — 2026-05-03
 
 First release as a standalone repo, spun off from
