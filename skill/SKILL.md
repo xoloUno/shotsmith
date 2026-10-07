@@ -5,13 +5,13 @@ description: Compose App Store screenshots with `shotsmith` — gradient backgro
 
 # shotsmith
 
-`shotsmith` 0.2.0 composes App Store Connect-ready screenshots from already-framed PNGs (typically produced by `frames-cli`). It adds gradient backgrounds, captions, optional subtitles, and handles multi-locale rendering. Stable per-device directory contract: `raw/` → `framed/` → `composed/`.
+`shotsmith` 0.2.0 composes App Store Connect-ready screenshots from already-framed PNGs (typically produced by `frames-cli`). It adds gradient backgrounds, captions, optional subtitles, and handles multi-locale rendering. Stable per-device directory contract: `raw/` → `framed/` → `composed/` for iPhone/iPad; passthrough devices (Apple Watch) go `raw/` → output with no framing or composition.
 
 ## What Agents Should Know
 
-- The CLI is `shotsmith`. Five subcommands: `stage`, `frame`, `compose`, `verify`, `pipeline`. All take `--config`/`-c <path>`, `--locale <code>` (repeatable), `--device <iphone|ipad>` (repeatable). With no filter flags, every (device × locale) combination runs.
-- **Don't bypass the directory contract.** PNGs belong in `<input>/<locale>/raw/` (capture output) or `<input>/<locale>/framed/` (frames-cli output). Loose PNGs at the locale root are an anti-pattern that `verify` flags. The composed output goes to `<output>/<locale>/<device>/`.
-- Apple Watch screenshots are screen-only on the ASC submission path — shotsmith **never** composes them. Stage raw `simctl io screenshot` output (422×514 native for Ultra 3) directly into the composed-output dir alongside iPhone/iPad. The watch hardware corner-radius would clip any framing or caption art at viewing time.
+- The CLI is `shotsmith`. Six subcommands: `stage`, `frame`, `passthrough`, `compose`, `verify`, `pipeline`. All take `--config`/`-c <path>`, `--locale <code>` (repeatable), `--device <iphone|ipad|watch>` (repeatable). With no filter flags, every (device × locale) combination runs — except that `frame` and `compose` skip passthrough devices and `passthrough` only touches them.
+- **Don't bypass the directory contract.** PNGs belong in `<input>/<locale>/raw/` (capture output) or `<input>/<locale>/framed/` (frames-cli output). Loose PNGs at the locale root are an anti-pattern that `verify` flags. Composed PNGs (and passthrough copies) go to each device's `output` path, `<output>/<locale>/`.
+- Apple Watch screenshots are screen-only on the ASC submission path — shotsmith **never** frames or composes them. `watch` is a **passthrough device**: declare it in `input`/`output` like iPhone/iPad, and the `passthrough` step copies `raw/` → output unmodified (honoring `input_mapping`). `verify` checks watch raws against the 422×514 Ultra 3 screen size. The watch hardware corner-radius would clip any framing or caption art at viewing time.
 - iPhone 6.9" (1320×2868) + iPad 13" (2064×2752) are Apple's required ASC submission sizes. Apple auto-scales them down to smaller iPhone/iPad slots — uploading those two covers every device class.
 - Pillow is the only runtime dependency. `pipx install` handles it.
 
@@ -20,6 +20,12 @@ description: Compose App Store screenshots with `shotsmith` — gradient backgro
 ```bash
 pipx install git+https://github.com/xoloUno/shotsmith.git@v0.2.0
 shotsmith --version
+```
+
+The `passthrough` subcommand, the `watch` device, and `verify --strict` landed on `main` after the v0.2.0 tag. Until the next release, install from `main` to get them:
+
+```bash
+pipx install --force git+https://github.com/xoloUno/shotsmith.git@main
 ```
 
 ## Quick Reference
@@ -32,27 +38,34 @@ shotsmith compose --config fastlane/shotsmith/config.json
 shotsmith frame --config fastlane/shotsmith/config.json
 shotsmith frame --config <path> --force          # re-frame existing PNGs
 
+# Copy passthrough-device raws (watch) straight to output/ — no frame, no compose
+shotsmith passthrough --config fastlane/shotsmith/config.json
+shotsmith passthrough --config <path> --locale en-US --force   # re-copy existing
+
 # Stage manual-gesture inputs (declared in manual_inputs config block) into raw/
 shotsmith stage --config fastlane/shotsmith/config.json
 
 # Validate the directory contract end-to-end
 shotsmith verify --config fastlane/shotsmith/config.json
+shotsmith verify --config <path> --strict        # warnings → errors (CI use)
 
-# Run everything (verify → stage → frame → compose)
+# Run everything (verify → stage → frame → passthrough → compose)
 shotsmith pipeline --config fastlane/shotsmith/config.json
 shotsmith pipeline --config <path> --steps compose       # just re-render
-shotsmith pipeline --config <path> --steps capture,stage,frame,compose
+shotsmith pipeline --config <path> --steps capture,stage,frame,passthrough,compose
 ```
 
-`pipeline --steps` defaults to `stage,frame,compose`. Add `capture` if your config defines a `pipeline.capture_hook`.
+`pipeline --steps` defaults to `stage,frame,passthrough,compose`. Add `capture` if your config defines a `pipeline.capture_hook`. `stage` is a no-op without a `manual_inputs` block; `passthrough` is a no-op without a passthrough device (today: `watch`) in the config.
 
 ## Config Schema (shorthand)
 
 ```json
 {
   "version": 2,
-  "input":  { "iphone": "../screenshots/{locale}/iPhone 6.9\" Display" },
-  "output": { "iphone": "composed/{locale}/iPhone 6.9\" Display" },
+  "input":  { "iphone": "../screenshots/{locale}/iPhone 6.9\" Display",
+              "watch":  "../screenshots/{locale}/Apple Watch Ultra 3 (49mm)" },
+  "output": { "iphone": "composed/{locale}/iPhone 6.9\" Display",
+              "watch":  "composed/{locale}/Apple Watch Ultra 3 (49mm)" },
   "pipeline": { "frames_cli": "frames", "verify_strict": true },
   "background": {
     "type": "linear-gradient",
@@ -81,7 +94,7 @@ shotsmith pipeline --config <path> --steps capture,stage,frame,compose
 }
 ```
 
-Path templates use `{locale}`. All paths are config-relative. `subtitle`, `manual_inputs`, `input_mapping`, and `pipeline` are optional.
+Path templates use `{locale}`; `manual_inputs.source` also accepts `{device}`. All paths are config-relative. Device keys are `iphone`, `ipad`, and `watch` (passthrough — `input`/`output` only, no caption sizes). `subtitle`, `manual_inputs`, `input_mapping`, and `pipeline` are optional.
 
 ## Captions File
 
@@ -126,19 +139,19 @@ Means a PNG in `framed/` has dimensions like 1320×2868 — those are the *outpu
 
 ## Watch screenshots
 
-shotsmith never composes Apple Watch screenshots for ASC submissions. The capture path is:
+shotsmith never frames or composes Apple Watch screenshots for ASC submissions. Capture straight into the watch lane's `raw/` dir:
 
 ```bash
-xcrun simctl io "$WATCH_SIM" screenshot path/to/output.png
+xcrun simctl io "$WATCH_SIM" screenshot "<watch input>/<locale>/raw/01_Home.png"
 ```
 
-Stage the raw PNG into the composed-output dir so a single `upload_screenshots` ships everything. See the upstream playbook's `.claude/rules/screenshot-pipeline.md` for the seven-gotcha checklist (ASC dimensions per device class, alpha rejection rules, sheet auto-presentation timing, ScrollViewReader race conditions, etc.).
+With `watch` declared in `input`/`output`, `shotsmith pipeline` (or `shotsmith passthrough` alone) copies `raw/` → output unmodified, next to the composed iPhone/iPad PNGs, so a single `upload_screenshots` ships everything. Don't hand-copy watch PNGs into the output dir — that skips `verify`'s 422×514 dimension check and `input_mapping` renames. See the upstream playbook's `.claude/rules/screenshot-pipeline.md` for the seven-gotcha checklist (ASC dimensions per device class, alpha rejection rules, sheet auto-presentation timing, ScrollViewReader race conditions, etc.).
 
 ## Tips
 
-- The `raw/` and `framed/` dirs are **never** overwritten by shotsmith. Re-running `compose` with new gradient stops or caption text re-renders in seconds without touching captures or framed intermediates.
+- shotsmith **never** overwrites `raw/`. `frame` only rewrites a `framed/` PNG when its `raw/` source is newer (or with `--force`); `passthrough` applies the same rule to watch output. Re-running `compose` with new gradient stops or caption text re-renders in seconds without touching captures or framed intermediates.
 - `verify` is fast and information-dense. Run it before `compose` after any config edit.
-- `--dry-run` works on `stage`, `frame`, `compose`, and `pipeline`. Plans without writing PNGs.
+- `--dry-run` works on `stage`, `frame`, `passthrough`, `compose`, and `pipeline`. Plans without writing PNGs.
 - Bundled gradient presets at `templates/presets/`: `mauve`, `royal-purple`, `apple-music`. Copy any one as a starting point.
 - shotsmith deliberately doesn't replace `frames-cli`. They compose: `frames-cli` does device bezels (which it does well), shotsmith adds the gradient + caption layer.
 
