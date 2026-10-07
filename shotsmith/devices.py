@@ -7,6 +7,8 @@ Sizes pulled from Apple's App Store Connect screenshot specifications:
 https://developer.apple.com/help/app-store-connect/reference/screenshot-specifications/
 """
 
+from __future__ import annotations
+
 from dataclasses import dataclass
 
 

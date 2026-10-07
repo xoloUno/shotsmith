@@ -20,6 +20,10 @@ one bug fix, one path-template improvement, two features. No schema break
   re-frames when `raw/<f>.png` is newer than `framed/<f>.png` (make-style),
   no `--force` needed. The same mtime guard applies to the new passthrough
   step.
+- **Python 3.9 imports again.** An unreleased change added an `int | None`
+  dataclass annotation to `devices.py` without `from __future__ import
+  annotations`, so the package failed to import on stock macOS
+  `/usr/bin/python3` (3.9). CI now tests 3.9 too.
 
 ### Added
 
